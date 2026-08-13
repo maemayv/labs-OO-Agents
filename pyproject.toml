@@ -90,7 +90,7 @@ cli = ["nooa-cli"]
 memory = ["nooa-memory"]
 bench = ["nooa-bench"]
 # ARC-AGI-3 example agent (examples/arc_agi_3): the public ARC-AGI-3 SDK + deps.
-# Install with `pip install "nemo-oo-agents[arc]"` (or `uv sync --extra arc`).
+# Install with `pip install "nooa[arc]"` (or `uv sync --extra arc`).
 arc = [
     "arc-agi>=0.9.8",
     "arcengine>=0.9.3",

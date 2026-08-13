@@ -21,7 +21,7 @@ from pathlib import Path
 try:
     from nooa.mcp import MCPManager
 except ImportError as e:
-    raise ImportError("mcp-nemo-oo-agents not installed. Run: uv sync --extra mcp") from e
+    raise ImportError("nooa[mcp] not installed. Run: uv sync --extra mcp") from e
 
 from nooa.util.quickstart import *
 
