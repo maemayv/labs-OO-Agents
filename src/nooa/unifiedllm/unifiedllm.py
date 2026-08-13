@@ -17,6 +17,7 @@ from typing import Any, Literal, cast
 import litellm
 from pydantic import BaseModel, RootModel
 
+from .concurrency import limiter, slot
 from .http_config import HttpConfig
 from .retry import EmptyContentError, sync_retry, with_retry
 from .retry_config import RetryConfig
@@ -1153,9 +1154,13 @@ def _update_token_calibration(
 class UnifiedLLM(ABC):
     _registry_config: dict[str, Any] | None
 
-    def __init__(self, model: str, **config):
+    def __init__(self, model: str, max_concurrent: int = 0, **config):
         self.model = model
         self.config = config
+        # Bounds calls in flight to this endpoint across every client that shares it. 0 is
+        # unbounded, which is the default. See concurrency.py.
+        self.max_concurrent = max_concurrent
+        self._slot_endpoint = config.get("api_base")
         self._registry_config = None
         # Cache control injection — shared by CompletionClient and ResponsesClient
         self.cache_control_injection_points: list[dict[str, Any]] = (
@@ -1164,6 +1169,10 @@ class UnifiedLLM(ABC):
         # Per-client HTTP transport (httpx clients + litellm wrappers). Set by
         # concrete subclasses; guarded here so base helpers stay safe.
         self._http: _ClientHttp | None = None
+
+    def _slot(self) -> slot:
+        """Guard one call against this endpoint's ceiling. A no-op when unbounded."""
+        return slot(limiter(self._slot_endpoint, self.max_concurrent), self._slot_endpoint)
 
     def close(self) -> None:
         """Release this client's sync HTTP resources (its own httpx clients)."""
@@ -1997,11 +2006,14 @@ class CompletionClient(UnifiedLLM):
 
         # Track LLM call for debugging (visible via SIGUSR2 if nooa debug handler installed)
         with _track_llm_call(model=self.model, endpoint=self.config.get("api_base")):
-            raw_response = (
-                await with_retry(_make_call, config=self.retry_config)
-                if self.retry_config
-                else await _make_call()
-            )
+            # Outside with_retry on purpose: a call waiting for a slot has not failed, so the
+            # wait must not spend the retry budget.
+            async with self._slot():
+                raw_response = (
+                    await with_retry(_make_call, config=self.retry_config)
+                    if self.retry_config
+                    else await _make_call()
+                )
 
         reasoning, usage = _extract_reasoning_and_usage(raw_response)
         if usage:
@@ -2482,11 +2494,14 @@ class ResponsesClient(UnifiedLLM):
 
         # Track LLM call for debugging (visible via SIGUSR2 if nooa debug handler installed)
         with _track_llm_call(model=self.model, endpoint=self.config.get("api_base")):
-            raw_response = (
-                await with_retry(_make_call, config=self.retry_config)
-                if self.retry_config
-                else await _make_call()
-            )
+            # Outside with_retry on purpose: a call waiting for a slot has not failed, so the
+            # wait must not spend the retry budget.
+            async with self._slot():
+                raw_response = (
+                    await with_retry(_make_call, config=self.retry_config)
+                    if self.retry_config
+                    else await _make_call()
+                )
 
         # Extract usage if available (Responses API may have different structure)
         usage = None

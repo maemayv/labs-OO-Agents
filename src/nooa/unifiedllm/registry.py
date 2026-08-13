@@ -393,6 +393,10 @@ def get_llm_client(name: str, *, client_type: str | None = None, **overrides) ->
     # retry behavior. ``retry_config: false`` means a single attempt for every
     # endpoint error; a mapping is passed to RetryConfig(...). Explicit call-site
     # overrides still win.
+    # Endpoint concurrency ceiling. Absent or 0 means unbounded, which is the default.
+    if "max_concurrent" in config and "max_concurrent" not in overrides:
+        params["max_concurrent"] = config["max_concurrent"]
+
     if "retry_config" in config and "retry_config" not in overrides:
         retry_config = config["retry_config"]
         if retry_config is False or retry_config is None:
