@@ -532,14 +532,24 @@ class BashSession:
         return ctrl_lines, stdout, stderr, timed_out
 
     async def _read_control_until(self, sentinel: str, timeout: float) -> tuple[list[str], bool]:
-        """Read lines from control fd until sentinel. Returns (lines, timed_out)."""
+        """Read lines from control fd until sentinel. Returns (lines, timed_out).
+
+        `timeout` is the budget for the whole read, not for each line. A command
+        that keeps the control channel busy would otherwise renew it on every
+        line and run for an unbounded total.
+        """
         ctrl = self._control_reader
         assert ctrl is not None
         lines: list[str] = []
         timed_out = False
+        deadline = asyncio.get_running_loop().time() + timeout
         while True:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                timed_out = True
+                break
             try:
-                raw = await asyncio.wait_for(ctrl.readline(), timeout=timeout)
+                raw = await asyncio.wait_for(ctrl.readline(), timeout=remaining)
             except TimeoutError:
                 timed_out = True
                 break
